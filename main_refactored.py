@@ -58,6 +58,8 @@ class StarGan:
         self.cuda = torch.cuda.is_available()
         self.criterion_cycle = torch.nn.L1Loss()
         self.generator, self.discriminator = self.load_models()
+        self.generator_scaler = torch.cuda.amp.GradScaler()
+        self.discriminator_scaler = torch.cuda.amp.GradScaler()
 
         self.optimizer_G = torch.optim.Adam(
             self.generator.parameters(), lr=self.lr, betas=(self.b1, self.b2)
@@ -230,30 +232,35 @@ class StarGan:
                     self.tensor(np.random.randint(0, 2, (imgs.size(0), self.c_dim)))
                 )
                 # Generate fake batch of images
-                fake_imgs = self.generator(imgs, sampled_c)
-                #  Train Discriminator
-                self.optimizer_D.zero_grad()
-                # Real images
-                real_validity, pred_cls = self.discriminator(imgs)
-                # Fake images
-                fake_validity, _ = self.discriminator(fake_imgs.detach())
-                # Gradient penalty
-                gradient_penalty = self.compute_gradient_penalty(
-                    imgs.data, fake_imgs.data
-                )
-                # Adversarial loss
-                loss_D_adv = (
-                    -torch.mean(real_validity)
-                    + torch.mean(fake_validity)
-                    + self.lambda_gp * gradient_penalty
-                )
-                # Classification loss
-                loss_D_cls = self.criterion_cls(pred_cls, labels)
-                # Total loss
-                loss_D = loss_D_adv + self.lambda_cls * loss_D_cls
+                with torch.cuda.amp.autocast():
+                    fake_imgs = self.generator(imgs, sampled_c)
+                    #  Train Discriminator
+                    self.optimizer_D.zero_grad()
+                    # Real images
+                    real_validity, pred_cls = self.discriminator(imgs)
+                    # Fake images
+                    fake_validity, _ = self.discriminator(fake_imgs.detach())
+                    # Gradient penalty
+                    gradient_penalty = self.compute_gradient_penalty(
+                        imgs.data, fake_imgs.data
+                    )
+                    # Adversarial loss
+                    loss_D_adv = (
+                        -torch.mean(real_validity)
+                        + torch.mean(fake_validity)
+                        + self.lambda_gp * gradient_penalty
+                    )
+                    # Classification loss
+                    loss_D_cls = self.criterion_cls(pred_cls, labels)
+                    # Total loss
+                    loss_D = loss_D_adv + self.lambda_cls * loss_D_cls
 
-                loss_D.backward()
-                self.optimizer_D.step()
+                self.generator_scaler.scale(loss_D).backward()
+                self.generator_scaler.step(self.optimizer_D)
+                self.generator_scaler.update()
+
+                # loss_D.backward()
+                # self.optimizer_D.step()
 
                 iteration = epoch * len(self.train_dataloader) + i
                 self.writer.add_scalar(
@@ -269,25 +276,30 @@ class StarGan:
                 if i % self.n_critic == 0:
                     #  Train Generator
                     # Translate and reconstruct image
-                    gen_imgs = self.generator(imgs, sampled_c)
-                    recov_imgs = self.generator(gen_imgs, labels)
-                    # Discriminator evaluates translated image
-                    fake_validity, pred_cls = self.discriminator(gen_imgs)
-                    # Adversarial loss
-                    loss_G_adv = -torch.mean(fake_validity)
-                    # Classification loss
-                    loss_G_cls = self.criterion_cls(pred_cls, sampled_c)
-                    # Reconstruction loss
-                    loss_G_rec = self.criterion_cycle(recov_imgs, imgs)
-                    # Total loss
-                    loss_G = (
-                        loss_G_adv
-                        + self.lambda_cls * loss_G_cls
-                        + self.lambda_rec * loss_G_rec
-                    )
+                    with torch.cuda.amp.autocast():
+                        gen_imgs = self.generator(imgs, sampled_c)
+                        recov_imgs = self.generator(gen_imgs, labels)
+                        # Discriminator evaluates translated image
+                        fake_validity, pred_cls = self.discriminator(gen_imgs)
+                        # Adversarial loss
+                        loss_G_adv = -torch.mean(fake_validity)
+                        # Classification loss
+                        loss_G_cls = self.criterion_cls(pred_cls, sampled_c)
+                        # Reconstruction loss
+                        loss_G_rec = self.criterion_cycle(recov_imgs, imgs)
+                        # Total loss
+                        loss_G = (
+                            loss_G_adv
+                            + self.lambda_cls * loss_G_cls
+                            + self.lambda_rec * loss_G_rec
+                        )
 
-                    loss_G.backward()
-                    self.optimizer_G.step()
+                    self.discriminator_scaler.scale(loss_G).backward()
+                    self.discriminator_scaler.step(self.optimizer_G)
+                    self.discriminator_scaler.update()
+
+                    # loss_G.backward()
+                    # self.optimizer_G.step()
 
                     self.writer.add_scalar(
                         "loss_G_rec/train_step", loss_G_rec, iteration
@@ -346,10 +358,10 @@ class StarGan:
 if __name__ == "__main__":
     dataset_path = "J:/kjn_YT/29_cycle_gan_black_white/CelebA/Img/img_align_celeba/img_align_celeba"
     params = {
-        "epoch": 10,
+        "epoch": 14,
         "n_epochs": 1000,
         "dataset_name": "img_align_celeba",
-        "batch_size": 16,
+        "batch_size": 32,
         "lr": 0.0002,
         "b1": 0.5,
         "b2": 0.999,

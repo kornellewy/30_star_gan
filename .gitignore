@@ -142,5 +142,5 @@ saved_models/
 CelebA*/
 archive/
 runs/
-main2.py
+main_pytorch_litning.py
 test_single_casees.py
