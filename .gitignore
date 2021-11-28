@@ -142,3 +142,5 @@ saved_models/
 CelebA*/
 archive/
 runs/
+main2.py
+test_single_casees.py
