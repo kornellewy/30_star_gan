@@ -15,7 +15,10 @@ class CelebADataset(Dataset):
 
         self.selected_attrs = attributes
         self.files = sorted(glob.glob("%s\\*.jpg" % root))
-        self.files = self.files[:-2000] if mode == "train" else self.files[-2000:]
+        valid_size = len(self.files) // 10
+        self.files = (
+            self.files if mode == "train" else self.files[-valid_size:]
+        )
         self.label_path = glob.glob("%s\\*.txt" % root)[0]
         self.annotations = self.get_annotations()
 

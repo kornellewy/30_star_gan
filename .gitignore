@@ -139,3 +139,6 @@ cython_debug/
 lightning_logs/
 images/
 saved_models/
+CelebA*/
+archive/
+runs/

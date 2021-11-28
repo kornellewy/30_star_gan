@@ -21,18 +21,21 @@ from datasets import *
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
+from torch.utils.tensorboard import SummaryWriter
 
 if __name__ == "__main__":
+    torch.cuda.empty_cache()
+    writer = SummaryWriter()
 
     os.makedirs("images", exist_ok=True)
     os.makedirs("saved_models", exist_ok=True)
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--epoch", type=int, default=0, help="epoch to start training from"
+        "--epoch", type=int, default=10, help="epoch to start training from"
     )
     parser.add_argument(
-        "--n_epochs", type=int, default=1, help="number of epochs of training"
+        "--n_epochs", type=int, default=1000, help="number of epochs of training"
     )
     parser.add_argument(
         "--dataset_name",
@@ -41,7 +44,7 @@ if __name__ == "__main__":
         help="name of the dataset",
     )
     parser.add_argument(
-        "--batch_size", type=int, default=20, help="size of the batches"
+        "--batch_size", type=int, default=16, help="size of the batches"
     )
     parser.add_argument("--lr", type=float, default=0.0002, help="adam: learning rate")
     parser.add_argument(
@@ -65,7 +68,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--n_cpu",
         type=int,
-        default=8,
+        default=10,
         help="number of cpu threads to use during batch generation",
     )
     parser.add_argument(
@@ -86,7 +89,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--checkpoint_interval",
         type=int,
-        default=-1,
+        default=1,
         help="interval between model checkpoints",
     )
     parser.add_argument(
@@ -168,10 +171,11 @@ if __name__ == "__main__":
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
     ]
 
+    dataset_path = "J:/kjn_YT/29_cycle_gan_black_white/CelebA/Img/img_align_celeba/img_align_celeba"
+
     dataloader = DataLoader(
         CelebADataset(
-            "J:/kjn_YT/29_cycle_gan_black_white/CelebA/Img/img_align_celeba/%s"
-            % opt.dataset_name,
+            dataset_path,
             transforms_=train_transforms,
             mode="train",
             attributes=opt.selected_attrs,
@@ -179,6 +183,7 @@ if __name__ == "__main__":
         batch_size=opt.batch_size,
         shuffle=True,
         num_workers=opt.n_cpu,
+        pin_memory=True,
     )
 
     val_transforms = [
@@ -189,8 +194,7 @@ if __name__ == "__main__":
 
     val_dataloader = DataLoader(
         CelebADataset(
-            "J:/kjn_YT/29_cycle_gan_black_white/CelebA/Img/img_align_celeba/%s"
-            % opt.dataset_name,
+            dataset_path,
             transforms_=val_transforms,
             mode="val",
             attributes=opt.selected_attrs,
@@ -198,6 +202,7 @@ if __name__ == "__main__":
         batch_size=10,
         shuffle=True,
         num_workers=1,
+        pin_memory=True,
     )
 
     # Tensor type
@@ -283,8 +288,10 @@ if __name__ == "__main__":
             labels = Variable(labels.type(Tensor))
 
             # Sample labels as generator inputs
+            # torch.Size([16, 5]), same 1
             sampled_c = Variable(Tensor(np.random.randint(0, 2, (imgs.size(0), c_dim))))
             # Generate fake batch of images
+
             fake_imgs = generator(imgs, sampled_c)
 
             # ---------------------
@@ -298,22 +305,36 @@ if __name__ == "__main__":
             # Fake images
             fake_validity, _ = discriminator(fake_imgs.detach())
             # Gradient penalty
+            # tensor(0.7245, grad_fn=<MeanBackward0>)
             gradient_penalty = compute_gradient_penalty(
                 discriminator, imgs.data, fake_imgs.data
             )
             # Adversarial loss
+            # tensor(7.2519, grad_fn=<AddBackward0>)
             loss_D_adv = (
+                # tensor(0.0456, grad_fn=<MeanBackward0>)
                 -torch.mean(real_validity)
+                # tensor(0.0525, grad_fn=<MeanBackward0>)
                 + torch.mean(fake_validity)
                 + lambda_gp * gradient_penalty
             )
             # Classification loss
+            # tensor(3.5210, grad_fn=<DivBackward0>)
             loss_D_cls = criterion_cls(pred_cls, labels)
             # Total loss
+            # tensor(10.7729, grad_fn=<AddBackward0>)
             loss_D = loss_D_adv + lambda_cls * loss_D_cls
 
             loss_D.backward()
             optimizer_D.step()
+
+            iteration = epoch * len(dataloader) + i
+            writer.add_scalar(
+                "gradient_penalty/train_step", gradient_penalty, iteration
+            )
+            writer.add_scalar("loss_D_adv/train_step", loss_D_adv, iteration)
+            writer.add_scalar("loss_D_cls/train_step", loss_D_cls, iteration)
+            writer.add_scalar("loss_D/train_step", loss_D, iteration)
 
             optimizer_G.zero_grad()
 
@@ -341,6 +362,11 @@ if __name__ == "__main__":
                 loss_G.backward()
                 optimizer_G.step()
 
+                writer.add_scalar("loss_G_rec/train_step", loss_G_rec, iteration)
+                writer.add_scalar("loss_G_cls/train_step", loss_G_cls, iteration)
+                writer.add_scalar("loss_G_adv/train_step", loss_G_adv, iteration)
+                writer.add_scalar("loss_G/train_step", loss_G, iteration)
+
                 # --------------
                 #  Log Progress
                 # --------------
@@ -354,7 +380,7 @@ if __name__ == "__main__":
                     / (batches_done + 1)
                 )
 
-                # Print log
+                # # Print log
                 sys.stdout.write(
                     "\r[Epoch %d/%d] [Batch %d/%d] [D adv: %f, aux: %f] [G loss: %f, adv: %f, aux: %f, cycle: %f] ETA: %s"
                     % (
