@@ -1,34 +1,29 @@
-import argparse
-import os
 import numpy as np
-import math
-import itertools
 import time
 import datetime
 import sys
 from pathlib import Path
+from PIL import Image
 
-import torchvision.transforms as transforms
-from torchvision.utils import save_image
-
-from torch.utils.data import DataLoader
-from torchvision import datasets
-from torch.autograd import Variable
-import torch.autograd as autograd
-
-from models import *
-from datasets import *
-
-import torch.nn as nn
 import torch.nn.functional as F
 import torch
 from torch.utils.tensorboard import SummaryWriter
+import torchvision.transforms as transforms
+from torchvision.utils import save_image
+from torch.utils.data import DataLoader
+from torch.autograd import Variable
+import torch.autograd as autograd
+
+from models import Discriminator, GeneratorResNet
+from datasets import CelebADataset
 
 
 class StarGan:
-    def __init__(self, params: dict, dataset_path: str) -> None:
-        self.writer = SummaryWriter()
+    def __init__(self, params: dict) -> None:
+        self.log_dir = ""
+        self.writer = SummaryWriter(log_dir=self.log_dir)
 
+        self.dataset_path = params["dataset_path"]
         self.epoch = params["epoch"]
         self.n_epochs = params["n_epochs"]
         self.dataset_name = params["dataset_name"]
@@ -68,7 +63,6 @@ class StarGan:
             self.discriminator.parameters(), lr=self.lr, betas=(self.b1, self.b2)
         )
 
-        self.dataset_path = dataset_path
         self.train_transforms = [
             transforms.Resize(int(1.12 * self.img_height), Image.BICUBIC),
             transforms.RandomCrop(self.img_height),
@@ -78,7 +72,7 @@ class StarGan:
         ]
         self.train_dataloader = DataLoader(
             CelebADataset(
-                dataset_path,
+                self.dataset_path,
                 transforms_=self.train_transforms,
                 mode="train",
                 attributes=self.selected_attrs,
@@ -95,7 +89,7 @@ class StarGan:
         ]
         self.val_dataloader = DataLoader(
             CelebADataset(
-                dataset_path,
+                self.dataset_path,
                 transforms_=self.val_transforms,
                 mode="val",
                 attributes=self.selected_attrs,
@@ -155,12 +149,14 @@ class StarGan:
         return generator, discriminator
 
     @staticmethod
-    def criterion_cls(logit, target):
+    def criterion_cls(logit, target: torch.Tensor) -> torch.Tensor:
         return F.binary_cross_entropy_with_logits(
             logit, target, size_average=False
         ) / logit.size(0)
 
-    def compute_gradient_penalty(self, real_samples, fake_samples):
+    def compute_gradient_penalty(
+        self, real_samples: torch.Tensor, fake_samples: torch.Tensor
+    ) -> torch.Tensor:
         """Calculates the gradient penalty loss for WGAN GP"""
         # Random weight term for interpolation between real and fake samples
         alpha = self.tensor(np.random.random((real_samples.size(0), 1, 1, 1)))
@@ -183,7 +179,7 @@ class StarGan:
         gradient_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean()
         return gradient_penalty
 
-    def sample_images(self, batches_done):
+    def sample_images(self, batches_done: int) -> None:
         """Saves a generated sample of domain translations"""
         val_imgs, val_labels = next(iter(self.val_dataloader))
         val_imgs = Variable(val_imgs.type(self.tensor))
@@ -219,7 +215,7 @@ class StarGan:
             normalize=True,
         )
 
-    def train(self):
+    def train(self) -> None:
         start_time = time.time()
         for epoch in range(self.epoch, self.n_epochs):
             for i, (imgs, labels) in enumerate(self.train_dataloader):
@@ -231,6 +227,9 @@ class StarGan:
                 sampled_c = Variable(
                     self.tensor(np.random.randint(0, 2, (imgs.size(0), self.c_dim)))
                 )
+                c = sampled_c
+                c = c.view(c.size(0), c.size(1), 1, 1)
+                c = c.repeat(1, 1, imgs.size(2), imgs.size(3))
                 # Generate fake batch of images
                 with torch.cuda.amp.autocast():
                     fake_imgs = self.generator(imgs, sampled_c)
@@ -347,17 +346,18 @@ class StarGan:
             if self.checkpoint_interval != -1 and epoch % self.checkpoint_interval == 0:
                 # Save model checkpoints
                 torch.save(
-                    self.generator.state_dict(), "saved_models/generator_%d.pth" % epoch
+                    self.generator.state_dict(),
+                    f"{self.train_models_save_dir_path}/generator_{epoch}.pth",
                 )
                 torch.save(
                     self.discriminator.state_dict(),
-                    "saved_models/discriminator_%d.pth" % epoch,
+                    f"{self.train_models_save_dir_path}/discriminator_{epoch}.pth",
                 )
 
 
 if __name__ == "__main__":
-    dataset_path = "J:/kjn_YT/29_cycle_gan_black_white/CelebA/Img/img_align_celeba/img_align_celeba"
     params = {
+        "dataset_path": "J:/kjn_YT/29_cycle_gan_black_white/CelebA/Img/img_align_celeba/img_align_celeba",
         "epoch": 14,
         "n_epochs": 1000,
         "dataset_name": "img_align_celeba",
@@ -379,5 +379,5 @@ if __name__ == "__main__":
         "lambda_rec": 10,
         "lambda_gp": 10,
     }
-    kjn = StarGan(params=params, dataset_path=dataset_path)
+    kjn = StarGan(params=params)
     kjn.train()

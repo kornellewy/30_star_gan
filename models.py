@@ -1,3 +1,11 @@
+"""
+source:
+https://github.com/eriklindernoren/PyTorch-GAN/blob/master/implementations/stargan/stargan.py
+"""
+
+
+from multiprocessing.spawn import _main
+from black import main
 import torch.nn as nn
 import torch.nn.functional as F
 import torch
@@ -16,7 +24,7 @@ def weights_init_normal(m):
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_features):
-        super(ResidualBlock, self).__init__()
+        super().__init__()
 
         conv_block = [
             nn.Conv2d(in_features, in_features, 3, stride=1, padding=1, bias=False),
@@ -34,7 +42,7 @@ class ResidualBlock(nn.Module):
 
 class GeneratorResNet(nn.Module):
     def __init__(self, img_shape=(3, 128, 128), res_blocks=9, c_dim=5):
-        super(GeneratorResNet, self).__init__()
+        super().__init__()
         channels, img_size, _ = img_shape
 
         # Initial convolution block
@@ -88,7 +96,7 @@ class GeneratorResNet(nn.Module):
 
 class Discriminator(nn.Module):
     def __init__(self, img_shape=(3, 128, 128), c_dim=5, n_strided=6):
-        super(Discriminator, self).__init__()
+        super().__init__()
         channels, img_size, _ = img_shape
 
         def discriminator_block(in_filters, out_filters):

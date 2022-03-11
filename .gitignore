@@ -144,3 +144,7 @@ archive/
 runs/
 main_pytorch_litning.py
 test_single_casees.py
+*.png
+*.jpg
+*.fsthumb
+*.wfp
